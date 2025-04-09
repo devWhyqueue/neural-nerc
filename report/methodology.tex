@@ -1,0 +1,27 @@
+\section{Methodology}
+Our NER model is a neural network that processes each sentence and outputs a predicted tag for each token. We chose a \textbf{BiLSTM (Bidirectional LSTM) network} with an embedding layer for words and a separate embedding layer for suffixes. The decision to use a BiLSTM is motivated by its ability to capture contextual dependencies in both forward and backward directions, which is crucial for entity recognition (for example, a token might be tagged as a drug based on words that come after it, like ``treated with X'').
+
+Figure~\ref{fig:architecture} illustrates the architecture of the neural network. The network has two input channels:
+\begin{itemize}
+    \item A \textbf{word input} sequence, feeding an Embedding layer that maps each word ID to a 100-dimensional dense vector representation.
+    \item A \textbf{suffix input} sequence, feeding a separate Embedding layer that maps each suffix ID to a 50-dimensional vector.
+\end{itemize}
+Both embedding layers are initialized randomly (uniformly) in our baseline implementation. (In principle, one could initialize the word embedding layer with pretrained embeddings such as Word2Vec or GloVe to potentially improve performance; this was an allowed enhancement mentioned in the task. In our experiments, we report results with random initialization for simplicity, but we discuss the effect of pretrained embeddings later.)
+
+The outputs of the word embedding and suffix embedding layers are sequences of vectors of length equal to the sentence length (150). We apply \textbf{dropout} (rate 0.1) to each embedding sequence as a regularization measure to prevent overfitting. The two sequences (word and suffix embeddings) are then concatenated at each time step, producing a combined feature vector per token that includes both word-level and character-level information.
+
+This combined sequence is fed into a \textbf{Bidirectional LSTM layer}. Specifically, we use a single BiLSTM layer with $H=200$ units in each LSTM direction (so 400 units total output dimensionality per time step after concatenation of forward and backward). The LSTM processes the sequence of embedding vectors and produces an output vector for each token position, capturing context from the entire sentence. We enable \emph{sequence return} (so each input position yields an output) and also apply a recurrent dropout of 0.1 on the LSTM to regularize the recurrent connections.
+
+On top of the LSTM outputs, we have an output layer to produce tag probabilities for each token. We use a \textbf{Time-Distributed Dense} layer with softmax activation, which is equivalent to applying a feed-forward softmax classifier at each time step. The Dense layer has size equal to $N_{\text{labels}}$, the number of possible tags (in our case, $N_{\text{labels}}=9$: B-Drug, I-Drug, B-Brand, I-Brand, B-Group, I-Group, B-drug\_n, I-drug\_n, plus the O tag; note that internally we also have index 0 for padding which we ignore in training). The softmax outputs a probability distribution over these tags for each token.
+
+Formally, if $\mathbf{x}_t$ is the concatenated embedding vector for token $t$, the BiLSTM computes hidden states $\overrightarrow{\mathbf{h}}_t$ and $\overleftarrow{\mathbf{h}}_t$ for the forward and backward passes, respectively. These are concatenated to $\mathbf{h}_t = [\overrightarrow{\mathbf{h}}_t; \overleftarrow{\mathbf{h}}_t$. Then the output layer computes $\mathbf{y}_t = \text{softmax}(W \mathbf{h}_t + \mathbf{b})$, where $W$ and $\mathbf{b}$ are learnable parameters. $\mathbf{y}_t$ is a vector of length $N_{\text{labels}}$ representing the predicted probabilities for each tag at position $t$. During inference, we simply take $\hat{y}_t = \arg\max_j (\mathbf{y}_t)_j$, the label with highest probability for token $t$. (We did not implement a CRF decoding layer, which is another possible enhancement to enforce valid BIO tag sequences. Instead, the model might sometimes produce invalid sequences like an I-tag without a preceding B-tag; however, we observed this to be rare in practice as the model learns the BIO format.)
+
+The model is compiled with the \textbf{Adam} optimizer for training, using the categorical cross-entropy loss (implemented as sparse categorical cross-entropy since we provide integer label indices). We mask the loss for padded positions so that predictions beyond the sentence end do not contribute. The accuracy metric reported during training is token-wise accuracy (which is a less informative metric for NER, but gives a rough sense of learning progress).
+
+In summary, the only parts of the code we modified were in this model definition (changing layer sizes, adding dropout, etc.) which was explicitly allowed. All data handling (tokenization, indexing) and evaluation routines were kept intact from the provided codebase.
+
+\begin{figure}[t]\centering
+\includegraphics[width=0.95\linewidth]{nerc_nn_architecture.png}
+\caption{Architecture of the BiLSTM NER model. Each token is represented by a word embedding (100-dim) and a suffix embedding (50-dim). These are concatenated and passed through a bidirectional LSTM. The output at each time step goes through a softmax classifier to predict the BIO-tag for the corresponding token.}
+\label{fig:architecture}
+\end{figure} 

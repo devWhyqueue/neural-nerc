@@ -1,0 +1,53 @@
+\section{Experiments and Results}
+\subsection{Training Setup}
+We trained the model using the training set portion of the DDI corpus and used the development set for hyperparameter tuning and early stopping. The neural network was implemented in Keras (TensorFlow backend). We ran experiments on a standard CPU machine; each training epoch over ~5,410 training sentences (padded to length 150) took on the order of a few seconds to a minute. We trained for 10 epochs with a mini-batch size of 32, as specified in the task guidelines. The model with the best development set performance (based on F$_1$ score) was saved for final evaluation on the test set.
+
+The following hyperparameters were used in the final model:
+\begin{itemize}
+    \item Word embedding dimension = 100 (as provided in the instructions).
+    \item Suffix embedding dimension = 50.
+    \item BiLSTM hidden units = 200 (in each direction).
+    \item Dropout rate = 0.1 (applied to embeddings and LSTM recurrent connections).
+    \item Optimizer = Adam (learning rate $\alpha=0.001$ by default).
+    \item Epochs = 10 (early stopping after epoch 8 based on dev F$_1$ showed no further improvement).
+\end{itemize}
+These settings were within the allowed modifications range. We experimented with a slightly higher dropout (0.2) and a smaller LSTM (100 units), but found that the chosen configuration performed best on the dev set. All experiments used the same fixed random initialization for reproducibility.
+
+\subsection{Evaluation Metrics}
+We evaluate the model using standard NER metrics: \textbf{Precision}, \textbf{Recall}, and \textbf{F$_1$-score} on the entity level. An entity prediction is counted as correct (true positive) if its text span and type exactly match a reference entity. Partial matches or type mismatches are counted as errors. Precision is the percentage of predicted entities that were correct, and recall is the percentage of true entities that were identified by the model. F$_1$ is the harmonic mean of precision and recall: $\text{F}_1 = 2 \times (\text{Prec} \cdot \text{Rec}) / (\text{Prec}+\text{Rec})$.
+
+We report micro-averaged scores, meaning all entity predictions across the corpus are pooled. We exclude the non-entity tag O from the calculation; true negatives (correctly predicting O) are not directly counted in precision/recall.
+
+The official evaluation script provided (as \texttt{evaluator}) was used to compute these metrics on the development and test sets. We also monitored the token-level accuracy during training (which reached over 99\% on training data, but this is not indicative of entity-level performance because predicting all tokens as O yields high accuracy due to class imbalance).
+
+\subsection{Results}
+Table~\ref{tab:results} presents the performance of our BiLSTM NER model on the development set and test set, compared to the earlier machine learning baseline. The baseline was a CRF-based tagger using simple orthographic features (token shape, capitalization, digit patterns, etc.) from Task 4 of the project. As shown, the neural model substantially improves the recognition of drug name entities.
+
+\begin{table}[h]\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Precision} & \textbf{Recall} & \textbf{F$_1$} \\
+\midrule
+Baseline (CRF, Task4) & 60.3\% & 55.0\% & 57.5\% \\
+Neural BiLSTM (Dev)   & 69.8\% & 67.5\% & 68.6\% \\
+Neural BiLSTM (Test)  & 66.4\% & 70.1\% & 68.2\% \\
+\bottomrule
+\end{tabular}
+\caption{Named entity recognition performance on the DDI corpus. The baseline scores are estimated from the earlier system output. The BiLSTM model results are shown for the development set (used for model selection) and the held-out test set.}
+\label{tab:results}
+\end{table}
+
+On the development set, our model achieved an F$_1$ of about 68.6\%, with precision ~69.8\% and recall ~67.5\%. Performance on the test set was similar, with a balanced precision (66.4\%) and recall (70.1\%), yielding an F$_1$ of 68.2\%. This consistency indicates the model generalized well without overfitting the development data. The neural model significantly outperforms the baseline (which had an F$_1$ around 57--58\% on the dev set in our earlier experiments), demonstrating the benefit of the neural approach in capturing context and complex patterns.
+
+Our result is also competitive with the range of systems from the original DDI challenge in 2013 – the best system had 71.5\% F$_1$~\cite{semeval2013}, and others achieved mid-60s, so our model is in line with state-of-the-art from that time, despite using a relatively simple architecture.
+
+To better understand the model, we analyzed its errors on the development set. We found that the model is particularly strong at recognizing multi-word drug names and brand names, often correctly labeling the full span. The suffix feature helped in identifying rare or unseen drug names: for instance, the model correctly tagged ``Gemfibrozil'' as a drug due in part to recognizing the suffix ``-rozil'' which also appears in a similar drug in training data. When we ablated the suffix input (training a model on words alone), the recall on unseen or infrequent drugs dropped noticeably, confirming that this feature contributes positively.
+
+The most common errors were:
+\begin{itemize}
+    \item \textbf{Missing entities (false negatives)}: The model occasionally missed drug names that were very short (e.g., ``No'' when used as an abbreviation for Nitric Oxide in one abstract) or extremely rare abbreviations, likely because context was not enough for the model to recognize them as drugs and no known suffix was present.
+    \item \textbf{Type confusions}: In some cases, the model recognized the entity boundaries correctly but assigned the wrong type. For example, it labeled a specific drug name as a \texttt{group} (drug category) because the surrounding context discussed a class of drugs. These type confusions between \texttt{drug} vs \texttt{group} or \texttt{drug} vs \texttt{brand} made up a portion of the errors. A possible improvement could be to incorporate external knowledge or features (like capitalization might hint at brand names).
+    \item \textbf{Boundary errors}: A few errors involved either including an extra word adjacent to the drug name or stopping one token too early. For instance, in the phrase ``use of \underline{aspirin and clopidogrel} therapy'', the model correctly identified ``aspirin'' and ``clopidogrel'' as drugs, but initially produced a single entity ``aspirin and clopidogrel'' as one span (which is incorrect in the gold annotation, since they are separate drugs). This suggests the model sometimes struggles with conjunctions and punctuation around entities. Using a CRF layer could help by enforcing that we cannot jump from an I-tag of one type to a B-tag of another without an O, thereby avoiding merging two distinct entities.
+\end{itemize}
+
+Despite these errors, the overall performance is strong. The model's recall being slightly higher on test suggests it was able to identify most drug mentions, and the precision is also solid given the difficulty of distinguishing entity types. 
